@@ -1,0 +1,8 @@
+# 1 Ignorar todo por defecto
+*
+
+# 2 Permitir archivos raíz necesarios
+!.gitignore
+!README.md
+!docker-compose.yml
+!.env.example

@@ -1,0 +1,39 @@
+name: getaway_group
+
+services:
+  npm-getaway:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm-getaway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:81:81"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks:
+      getaway-network:
+      global-network:
+        ipv4_address: 172.16.0.2
+
+  cloudflare-getaway:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-getaway
+    restart: unless-stopped
+    command: tunnel run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - npm-getaway
+    networks:
+      - getaway-network
+
+volumes:
+  npm_data:
+  npm_letsencrypt:
+
+networks:
+  getaway-network:
+    name: getaway-network
+  global-network:
+    name: ${GLOBAL_NETWORK_NAME}
+    external: true

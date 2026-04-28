@@ -1,0 +1,73 @@
+name: database_group
+
+services:
+  # MariaDB
+  mariadb-database:
+    image: mariadb:latest
+    container_name: mariadb-database
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: "${MARIADB_PASSWORD}"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - database-network
+
+  # MongoDB
+  mongodb-database:
+    image: mongo:latest
+    container_name: mongodb-database
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_INITDB_ROOT_USERNAME}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_INITDB_ROOT_PASSWORD}"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - database-network
+
+  # Redis
+  redis-database:
+    image: redis:alpine
+    container_name: redis-database
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - database-network
+
+  # Nginx como Firewall/Gateway
+  nginx-database:
+    image: nginx:alpine
+    container_name: nginx_gateway
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "3306:3306"
+      - "27017:27017"
+      - "6379:6379"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/streams.conf:/etc/nginx/conf.d/streams.conf:ro
+    networks:
+      database-network: {}
+      global_network:
+        ipv4_address: 172.16.0.3
+    depends_on:
+      - mariadb-database
+      - mongodb-database
+      - redis-database
+
+networks:
+  global_network:
+    name: ${GLOBAL_NETWORK_NAME}
+    external: true
+  database-network:
+    name: ${INTERNAL_NETWORK_NAME}
+    internal: true 
+
+volumes:
+  mariadb_data:
+  mongo_data:
+  redis_data:

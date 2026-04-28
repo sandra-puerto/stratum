@@ -1,0 +1,19 @@
+name: global_group
+
+services:
+  network-anchor:
+    image: alpine:latest
+    container_name: global-network-anchor
+    restart: unless-stopped
+    command: ["/bin/sh", "-c", "sleep infinity"]
+    networks:
+      public_bridge:
+        ipv4_address: 172.16.0.254
+
+networks:
+  public_bridge:
+    name: ${GLOBAL_NETWORK_NAME}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.16.0.0/24
