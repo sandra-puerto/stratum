@@ -7,8 +7,7 @@ services:
     restart: unless-stopped
     command: ["/bin/sh", "-c", "sleep infinity"]
     networks:
-      public_bridge:
-        ipv4_address: 172.16.0.254
+      - public_bridge
 
 networks:
   public_bridge:
