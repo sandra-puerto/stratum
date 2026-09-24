@@ -1,8 +1,22 @@
-# 1 Ignorar todo por defecto
-*
+# ============================================================================
+# STRATUM-CORE — gateway
+# Repository: stratum-core
+# Isolation by design, not by discipline.
+# ============================================================================
 
-# 2 Permitir archivos raíz necesarios
-!.gitignore
-!README.md
-!docker-compose.yml
-!.env.example
+# Environment files. Must never be committed to version control.
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Runtime data and secrets. Reserved for future use.
+data/
+secrets/
+
+# Operating system artifacts
+.DS_Store
+Thumbs.db

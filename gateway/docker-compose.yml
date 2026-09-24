@@ -1,45 +1,150 @@
+# ============================================================================
+# STRATUM-CORE — gateway
+# Repository: stratum-core
+# Isolation by design, not by discipline.
+# ============================================================================
+#
+# Component ......... gateway
+# Function .......... Access layer. Termination of inbound traffic from
+#                     the Internet and distribution to the Stratum DMZ.
+# Artifact .......... docker-compose.yml
+# Revision .......... 1.1.7
+# Status ............ Production
+#
+# ============================================================================
+
+x-defaults: &defaults
+  restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+      compress: "true"
+
+name: stratum-gateway
+
 services:
+
+  # --------------------------------------------------------------------------
+  # Reverse Proxy & Certificate Manager (Nginx Proxy Manager)
+  # --------------------------------------------------------------------------
   npm:
+    <<: *defaults
     image: jc21/nginx-proxy-manager:latest
-    container_name: npm-gateway
-    restart: unless-stopped
+    container_name: stratum-gateway-npm
+
     ports:
       - "127.0.0.1:81:81"
-      - "127.0.0.1:80:80"
-      - "127.0.0.1:443:443"
+
+    environment:
+      TZ: ${TZ:-America/Bogota}
+      DISABLE_IPV6: "true"
+
     volumes:
       - npm_data:/data
       - npm_letsencrypt:/etc/letsencrypt
-    networks:
-      gateway_internal:
-        ipv4_address: 172.18.1.5
-      global_network:
 
-  cloudflare:
+    networks:
+      - gateway_internal
+      - stratum_dmz
+
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /run:size=32m,mode=0755,exec
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+
+    pids_limit: 200
+    mem_limit: 512m
+    memswap_limit: 512m
+
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "gateway"
+      com.stratum-core.role: "reverse-proxy"
+      com.stratum-core.revision: "1.1.7"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+    healthcheck:
+      test: ["CMD", "/bin/check-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # --------------------------------------------------------------------------
+  # Inbound Edge Tunnel (Cloudflare Tunnel)
+  # --------------------------------------------------------------------------
+  cloudflared:
+    <<: *defaults
     image: cloudflare/cloudflared:latest
-    container_name: cloudflare-tunnel
-    restart: unless-stopped
-    command: tunnel run --token ${CF_TUNNEL_TOKEN}
-    depends_on:
-      - npm
-    networks:
-      gateway_internal:
-        ipv4_address: 172.18.1.10
+    container_name: stratum-gateway-cloudflared
+    init: true
 
-volumes:
-  npm_data:
-  npm_letsencrypt:
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+
+    user: "65534:65534"
+
+    networks:
+      - gateway_internal
+      - stratum_dmz
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=16m,mode=1777,uid=65534,gid=65534
+      - /home/nonroot/.cloudflared:size=8m,mode=0700,uid=65534,gid=65534
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    pids_limit: 50
+    mem_limit: 128m
+    memswap_limit: 128m
+
+    stop_signal: SIGTERM
+    stop_grace_period: 15s
+
+    depends_on:
+      npm:
+        condition: service_healthy
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "gateway"
+      com.stratum-core.role: "tunnel-client"
+      com.stratum-core.revision: "1.1.7"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
 
 networks:
   gateway_internal:
-    name: gateway_internal
+    name: stratum_gateway_internal
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.18.1.0/24
-          ip_range: 172.18.1.64/26
-          gateway: 172.18.1.254
-          
-  global_network:
-    name: ${GLOBAL_NETWORK_NAME}
+
+  stratum_dmz:
+    name: ${STRATUM_DMZ_NETWORK:-stratum_dmz}
     external: true
+
+volumes:
+  npm_data:
+    name: stratum-gateway-npm-data
+  npm_letsencrypt:
+    name: stratum-gateway-npm-letsencrypt

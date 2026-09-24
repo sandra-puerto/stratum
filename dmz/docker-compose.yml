@@ -1,0 +1,140 @@
+# ============================================================================
+# STRATUM-CORE — dmz
+# Repository: stratum-core
+# Isolation by design, not by discipline.
+# ============================================================================
+#
+# Component ......... dmz
+# Function .......... Provisioning and maintenance of the shared network
+#                     (Demilitarized Zone) for the Stratum platform.
+# Artifact .......... docker-compose.yml
+# Revision .......... 1.0.0
+# Status ............ Production
+#
+# ----------------------------------------------------------------------------
+# 1. OVERVIEW
+# ----------------------------------------------------------------------------
+# This component does not host business services. It exists solely to
+# provision and maintain the shared Docker network `stratum_dmz`, which
+# serves as the point of convergence between the access layer (gateway)
+# and the boundary clients of each Stratum island.
+#
+# Docker Compose does not permit declaring a network without at least one
+# service attached to it. Therefore, a minimal anchor container is used to
+# keep the network alive. The anchor executes no application logic, exposes
+# no ports, and has no outbound connectivity requirement.
+#
+# ----------------------------------------------------------------------------
+# 2. NETWORK TOPOLOGY
+# ----------------------------------------------------------------------------
+#   stratum_dmz (external)
+#     Shared Demilitarized Zone. Consumed by gateway and database via
+#     `external: true`. No services of this component are attached to
+#     any network other than stratum_dmz.
+#
+# ----------------------------------------------------------------------------
+# 3. DEPLOYMENT ORDER
+# ----------------------------------------------------------------------------
+#   1. dmz/        (this component)   -> provisions stratum_dmz
+#   2. gateway/                       -> consumes stratum_dmz
+#   3. database/                      -> consumes stratum_dmz
+#
+# Deploying a consumer before this component results in the error:
+#   network stratum_dmz declared as external, but could not be found.
+#
+# ----------------------------------------------------------------------------
+# 4. SECURITY CONTROLS
+# ----------------------------------------------------------------------------
+#   - Execution as unprivileged user (UID/GID 65534).
+#   - Immutable root filesystem (read_only: true).
+#   - All Linux capabilities dropped (cap_drop: ALL).
+#   - Privilege escalation prohibited (no-new-privileges: true).
+#   - No network ports published to the host.
+#   - No secrets, credentials, or configuration data.
+#   - Process, memory, and swap limits enforced.
+#   - Signal handling via PID 1 (init: true).
+#   - Structured log rotation (10 MB × 3 files, compressed).
+#
+# ----------------------------------------------------------------------------
+# 5. MAINTENANCE
+# ----------------------------------------------------------------------------
+#   - Base image pinned by version. Digest pinning is recommended for
+#     regulated environments.
+#   - Update procedure: scripts/update.sh (monthly, cron-scheduled).
+#
+# ----------------------------------------------------------------------------
+# 6. REFERENCES
+# ----------------------------------------------------------------------------
+#   - ../../SECURITY.md (repository root)
+#   - ./README.md
+# ============================================================================
+
+x-defaults: &defaults
+  restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+      compress: "true"
+
+name: stratum-dmz
+
+services:
+
+  anchor:
+    <<: *defaults
+    image: alpine:3.20.3
+    container_name: stratum-dmz-anchor
+    init: true
+
+    # The anchor performs no application logic. It awaits termination
+    # signals and exits cleanly upon receipt.
+    command: ["/bin/sh", "-c", "trap 'exit 0' TERM INT; sleep infinity & wait"]
+
+    # Execution as unprivileged user. UID/GID 65534 corresponds to
+    # `nobody:nogroup` in the Alpine base image.
+    user: "65534:65534"
+
+    networks:
+      - stratum_dmz
+
+    # Immutable root filesystem.
+    read_only: true
+
+    # Minimal writable scratch space. Required by the container runtime
+    # and by POSIX-compliant processes for temporary file operations.
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+
+    # Prohibit privilege escalation via setuid/setgid binaries.
+    security_opt:
+      - no-new-privileges:true
+
+    # Drop all Linux capabilities. This container requires none.
+    cap_drop:
+      - ALL
+
+    # Resource constraints.
+    pids_limit: 10
+    mem_limit: 16m
+    memswap_limit: 16m
+
+    # Termination behavior.
+    stop_signal: SIGTERM
+    stop_grace_period: 5s
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "dmz"
+      com.stratum-core.role: "network-anchor"
+      com.stratum-core.revision: "1.0.0"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+networks:
+  stratum_dmz:
+    name: ${STRATUM_DMZ_NETWORK:-stratum_dmz}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${STRATUM_DMZ_SUBNET:-172.16.0.0/24}

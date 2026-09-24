@@ -1,5 +1,5 @@
 # ============================================================================
-# STRATUM-CORE — database
+# STRATUM-CORE — dmz
 # Repository: stratum-core
 # Isolation by design, not by discipline.
 # ============================================================================
@@ -16,9 +16,6 @@ logs/
 # Runtime data and secrets. Reserved for future use.
 data/
 secrets/
-
-# Backup artifacts
-backups/
 
 # Operating system artifacts
 .DS_Store

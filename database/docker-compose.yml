@@ -1,75 +1,298 @@
+# ============================================================================
+# STRATUM-CORE — database
+# Repository: stratum-core
+# Isolation by design, not by discipline.
+# ============================================================================
+
+x-defaults: &defaults
+  restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+      compress: "true"
+
+name: stratum-database
+
 services:
-  mariadb:
-    image: mariadb:latest
-    container_name: mariadb-core
-    restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-    volumes:
-      - mariadb_data:/var/lib/mysql
-    networks:
-      database_internal:
-        ipv4_address: 172.18.2.20
 
+  # --------------------------------------------------------------------------
+  # Relational engine (PostgreSQL 16 Alpine - Hardened Setup)
+  # --------------------------------------------------------------------------
+  postgres:
+    <<: *defaults
+    image: postgres:16-alpine
+    container_name: stratum-database-postgres
+    init: true
+
+    environment:
+      TZ: ${TZ:-America/Bogota}
+      POSTGRES_USER: ${POSTGRES_USER:-stratum_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-stratum_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - database_internal
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/run/postgresql:size=16m,mode=0775,uid=70,gid=70
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+
+    pids_limit: 150
+    mem_limit: 512m
+    memswap_limit: 512m
+
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "database"
+      com.stratum-core.role: "relational-engine"
+      com.stratum-core.revision: "1.3.0"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # --------------------------------------------------------------------------
+  # Document engine (MongoDB 7.0 LTS)
+  # --------------------------------------------------------------------------
   mongodb:
-    image: mongo:latest
-    container_name: mongodb-core
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-    volumes:
-      - mongo_data:/data/db
-    networks:
-      database_internal:
-        ipv4_address: 172.18.2.30
+    <<: *defaults
+    image: mongo:7.0
+    container_name: stratum-database-mongodb
+    init: true
 
+    environment:
+      TZ: ${TZ:-America/Bogota}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+
+    networks:
+      - database_internal
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SETPCAP
+
+    pids_limit: 200
+    mem_limit: 1g
+    memswap_limit: 1g
+
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "database"
+      com.stratum-core.role: "document-engine"
+      com.stratum-core.revision: "1.3.0"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          mongosh --quiet
+          -u "$$MONGO_INITDB_ROOT_USERNAME"
+          -p "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval "db.adminCommand({ping:1}).ok" | grep -q 1
+      interval: 30s
+      start_interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # --------------------------------------------------------------------------
+  # Key-value engine
+  # --------------------------------------------------------------------------
   redis:
-    image: redis:alpine
-    container_name: redis-core
-    restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    <<: *defaults
+    image: redis:latest
+    container_name: stratum-database-redis
+    init: true
+
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+      - "--appendonly"
+      - "yes"
+      - "--appendfsync"
+      - "everysec"
+      - "--save"
+      - "900"
+      - "1"
+
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
     volumes:
       - redis_data:/data
-    networks:
-      database_internal:
-        ipv4_address: 172.18.2.40
 
+    networks:
+      - database_internal
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - SETPCAP
+
+    pids_limit: 100
+    mem_limit: 256m
+    memswap_limit: 256m
+
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "database"
+      com.stratum-core.role: "key-value-engine"
+      com.stratum-core.revision: "1.3.0"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 30s
+      start_interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # --------------------------------------------------------------------------
+  # Boundary client
+  # --------------------------------------------------------------------------
   nginx-database:
-    image: nginx:alpine
-    container_name: nginx-database
-    restart: unless-stopped
-    ports:
-      - "3306:3306"
-      - "27017:27017"
-      - "6379:6379"
+    <<: *defaults
+    image: nginx:latest
+    container_name: stratum-database-nginx
+    init: true
+
+    entrypoint: ["nginx", "-g", "daemon off;"]
+
+    user: "101:101"
+
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      database_internal:
-        ipv4_address: 172.18.2.5
-      global_network:
-    depends_on:
-      - mariadb
-      - mongodb
-      - redis
 
-volumes:
-  mariadb_data:
-  mongo_data:
-  redis_data:
+    networks:
+      - database_internal
+      - stratum_dmz
+
+    read_only: true
+
+    tmpfs:
+      - /var/cache/nginx:size=64m,mode=0777,uid=101,gid=101
+      - /var/run:size=8m,mode=0755,uid=101,gid=101
+      - /tmp:size=16m,mode=1777
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    pids_limit: 100
+    mem_limit: 64m
+    memswap_limit: 64m
+
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    labels:
+      com.stratum-core.repository: "stratum-core"
+      com.stratum-core.component: "database"
+      com.stratum-core.role: "boundary-client"
+      com.stratum-core.revision: "1.3.0"
+      com.stratum-core.slogan: "Isolation by design, not by discipline."
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      start_interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 networks:
   database_internal:
-    name: database_internal_net
+    name: stratum_database_internal
     driver: bridge
     internal: true
-    ipam:
-      config:
-        - subnet: 172.18.2.0/24
-          ip_range: 172.18.2.64/26
-          gateway: 172.18.2.254
 
-  global_network:
-    name: ${GLOBAL_NETWORK_NAME}
+  stratum_dmz:
+    name: ${STRATUM_DMZ_NETWORK:-stratum_dmz}
     external: true
+
+volumes:
+  postgres_data:
+    name: stratum-database-postgres-data
+  mongodb_data:
+    name: stratum-database-mongodb-data
+  mongodb_config:
+    name: stratum-database-mongodb-config
+  redis_data:
+    name: stratum-database-redis-data
